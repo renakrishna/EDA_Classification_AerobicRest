@@ -1,77 +1,84 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-from predict import predict_from_df
+from predict import predict_full_signal
 
-# ---------------- CONFIG ----------------
 st.set_page_config(page_title="FocusGuard", layout="centered")
 
-# ---------------- HEADER ----------------
 st.title("FocusGuard: EDA Activity Classifier")
-st.write("Classify Rest vs Exercise using only EDA signals")
+st.write("Classifies Rest vs Aerobic Exercise from EDA signals")
 
-# ---------------- MODE SELECT ----------------
-mode = st.selectbox("Demo Mode", ["Upload File", "Simulate"])
+mode = st.selectbox("Demo Mode", ["Upload Real Data", "Simulate"])
 
 # =========================================================
-# ---------------- UPLOAD MODE ----------------
+# UPLOAD MODE (REAL DATA)
 # =========================================================
-if mode == "Upload File":
-    uploaded_file = st.file_uploader("Upload EDA CSV", type=["csv"])
+if mode == "Upload Real Data":
+    file = st.file_uploader("Upload CSV with 'eda' column", type=["csv"])
 
-    if uploaded_file:
-        try:
-            df = pd.read_csv(uploaded_file)
+    if file:
+        df = pd.read_csv(file)
 
-            if 'eda' not in df.columns:
-                st.error("CSV must contain a column named 'eda'")
-            else:
-                st.subheader("EDA Signal")
-                st.line_chart(df['eda'])
+        if "eda" not in df.columns:
+            st.error("CSV must contain 'eda' column")
+        else:
+            st.subheader("EDA Signal")
+            st.line_chart(df["eda"])
 
-                pred = predict_from_df(df)
+            try:
+                result = predict_full_signal(df)
 
-                st.subheader("Prediction")
-                if pred == 1:
-                    st.success("Exercise")
+                st.subheader("Segment Predictions")
+
+                st.write("REST (0–120 sec):")
+                if result["rest_pred"] == 1:
+                    st.error(f"Predicted Exercise ({result['rest_conf']*100:.1f}%)")
                 else:
-                    st.info("Rest")
+                    st.success(f"Rest ({result['rest_conf']*100:.1f}%)")
 
-        except Exception as e:
-            st.error(f"Error reading file: {e}")
+                st.write("AEROBIC (1560–1740 sec):")
+                if result["aero_pred"] == 1:
+                    st.success(f"Exercise ({result['aero_conf']*100:.1f}%)")
+                else:
+                    st.error(f"Predicted Rest ({result['aero_conf']*100:.1f}%)")
+
+                st.caption("Segments: 0–120s = Rest | 1560–1740s = Exercise")
+
+            except Exception as e:
+                st.error(str(e))
 
 # =========================================================
-# ---------------- SIMULATION MODE ----------------
+# SIMULATION MODE (FOR DEMO)
 # =========================================================
 elif mode == "Simulate":
 
-    st.subheader("Generate Synthetic EDA Signal")
+    t = np.linspace(0, 1740, 1740 * 4)
 
-    sim_type = st.selectbox("Signal Type", ["Rest", "Exercise"])
+    # rest segment
+    rest = 0.5 + 0.05*np.sin(t[:480]) + 0.02*np.random.randn(480)
 
-    t = np.linspace(0, 10, 500)
+    # middle junk
+    mid = 0.5 + 0.02*np.random.randn(len(t) - 480 - 720)
 
-    if sim_type == "Rest":
-        signal = 0.5 + 0.05*np.sin(t) + 0.02*np.random.randn(len(t))
-    else:
-        signal = 0.5 + 0.4*np.sin(5*t) + 0.1*np.random.randn(len(t))
+    # exercise segment
+    exercise = 0.5 + 0.5*np.sin(5*t[:720]) + 0.1*np.random.randn(720)
 
+    signal = np.concatenate([rest, mid, exercise])
     df = pd.DataFrame({"eda": signal})
 
-    st.subheader("Simulated EDA Signal")
-    st.line_chart(df['eda'])
+    st.subheader("Simulated Full Signal")
+    st.line_chart(df["eda"])
 
-    pred = predict_from_df(df)
+    result = predict_full_signal(df)
 
-    st.subheader("Prediction")
-    if pred == 1:
-        st.success("Exercise")
-    else:
-        st.info("Rest")
+    st.subheader("Predictions")
 
-# =========================================================
-# ---------------- FOOTER (EXPLAINS YOUR PROJECT) ----------------
-# =========================================================
+    st.write("REST segment:")
+    st.success(f"Rest ({result['rest_conf']*100:.1f}%)")
+
+    st.write("AEROBIC segment:")
+    st.success(f"Exercise ({result['aero_conf']*100:.1f}%)")
+
 st.markdown("---")
-st.caption("Model: Extra Trees Classifier")
-st.caption("Features: Statistical + signal-based EDA features")
+st.caption("Model: Linear Discriminant Analysis (LDA)")
+st.caption("Features: Physiological EDA signal features")
