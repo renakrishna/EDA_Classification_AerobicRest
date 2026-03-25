@@ -1,8 +1,10 @@
 import numpy as np
-import pandas as pd
 import joblib
 from scipy.signal import butter, filtfilt, welch, find_peaks
 from scipy.stats import kurtosis, skew, iqr
+
+# ---------------- LOAD MODEL ----------------
+model = joblib.load("model.pkl")
 
 # ---------------- FILTERS ----------------
 def _filtfilt_safe(b, a, x):
@@ -19,7 +21,7 @@ def butter_lowpass(x, fs, cutoff=0.05, order=4):
     b, a = butter(order, cutoff/nyq, btype="low")
     return _filtfilt_safe(b, a, x)
 
-# ---------------- FEATURE EXTRACTION (YOUR 8 FEATURES) ----------------
+# ---------------- FEATURE EXTRACTION ----------------
 def extract_features(x, fs=4.0):
     x = np.asarray(x, dtype=float).squeeze()
 
@@ -47,10 +49,33 @@ def extract_features(x, fs=4.0):
         np.max(psd_peak_amps)
     ])
 
-# ---------------- LOAD MODEL ----------------
-model = joblib.load("model.pkl")
-
-def predict_from_df(df):
+# ---------------- MAIN PREDICTION ----------------
+def predict_full_signal(df, fs=4.0):
     x = df["eda"].values
-    feats = extract_features(x).reshape(1, -1)
-    return model.predict(feats)[0]
+
+    # Segment positions (from your experiment)
+    rest_end = int(120 * fs)
+    aero_start = int(1560 * fs)
+    aero_end = int(1740 * fs)
+
+    if len(x) < aero_end:
+        raise ValueError("Signal too short (needs ~1740 seconds)")
+
+    rest = x[:rest_end]
+    aerobic = x[aero_start:aero_end]
+
+    rest_feat = extract_features(rest, fs).reshape(1, -1)
+    aero_feat = extract_features(aerobic, fs).reshape(1, -1)
+
+    rest_pred = model.predict(rest_feat)[0]
+    aero_pred = model.predict(aero_feat)[0]
+
+    rest_prob = model.predict_proba(rest_feat)[0]
+    aero_prob = model.predict_proba(aero_feat)[0]
+
+    return {
+        "rest_pred": rest_pred,
+        "aero_pred": aero_pred,
+        "rest_conf": max(rest_prob),
+        "aero_conf": max(aero_prob)
+    }
